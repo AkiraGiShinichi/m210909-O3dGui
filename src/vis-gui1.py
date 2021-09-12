@@ -150,6 +150,19 @@ class AppWindow:
         self.window = gui.Application.instance.create_window("Open3D", width=1024, height=768)
         em = self.window.theme.font_size
 
+        # ─── REALSENSE CAMERA ────────────────────────────────────────────
+        self.pipeline = rs.pipeline()
+        self.config = rs.config()
+
+        self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        self.config.enable_stream(rs.stream.color, 640, 480, rs.format.rgb8, 30)
+
+        self.pipeline.start(self.config)
+        #
+        # ────────────────────────────────────────── REALSENSE CAMERA ─────
+        #
+
+
         # ─── MAIN DISPLAY ────────────────────────────────────────────────
         self.main_display = gui.SceneWidget()
         self.main_display.scene = rendering.Open3DScene(self.window.renderer)
@@ -186,7 +199,6 @@ class AppWindow:
         self._settings_panel = gui.Vert(0, gui.Margins(0.25 * em, 0.25* em, 0.25 * em, 0.25 * em))
         self._settings_panel.add_child(first_ctrls)
         self._settings_panel.add_child(second_ctrls)
-
         #
         # ───────────────────────────────────────────────────── PANEL ─────
         #
@@ -236,6 +248,8 @@ class AppWindow:
         self.window.set_on_menu_item_activated(AppWindow.MENU_QUIT, self._on_menu_quit)
         self.window.set_on_menu_item_activated(AppWindow.MENU_SHOW_SETTINGS, self._on_menu_toggle_settings_panel)
         self.window.set_on_menu_item_activated(AppWindow.MENU_ABOUT, self._on_menu_about)
+
+        threading.Thread(target=self._update_thread).start()
         #
         # ──────────────────────────────────────────────────── WINDOW ─────
         #
@@ -295,6 +309,34 @@ class AppWindow:
 
     def _on_menu_about(self):
         pass
+
+    def _update_thread(self):
+        while 1:
+            time.sleep(0.100)
+
+            frames = self.pipeline.wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+            color_frame = frames.get_color_frame()
+
+            if not depth_frame or not color_frame:
+                continue
+
+            depth_image = np.asarray(depth_frame.get_data())
+            color_image = np.asarray(color_frame.get_data())
+
+            # deph_image_dim, color_image_dim = depth_image.shape, color_image.shape
+
+            def update():
+                def to_o3d_image(np_image):
+                    return o3d.geometry.Image(np_image)
+                
+                def standardize_depth_image(image, alpha=0.03, color_map=cv2.COLORMAP_JET):
+                    return cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=alpha), color_map)
+
+                self.depth_image_preview.update_image(to_o3d_image(standardize_depth_image(depth_image)))
+                self.color_image_preview.update_image(to_o3d_image(color_image))
+            
+            gui.Application.instance.post_to_main_thread(self.window, update)
 
     def _say_hi(self):
         print("Hi!")
